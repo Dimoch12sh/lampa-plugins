@@ -1,49 +1,42 @@
 Lampa.Plugins.add('uafilm', {
     name: 'UA-Kino (uafilm)',
-    version: '1.0.2',
+    version: '1.0.3',
     type: 'video',
     component: 'uafilm',
     onReady: function(){
         var KEY = 'uafilm_enabled';
 
         if (Lampa.Notifi) {
-            Lampa.Notifi.show({ title: 'UA-Kino', text: 'Плагін завантажено v1.0.2', time: 3000 });
+            Lampa.Notifi.show({ title: 'UA-Kino', text: 'Плагін завантажено v1.0.3', time: 3000 });
         }
 
-        // 1) Пункт у головних налаштуваннях (через component + page)
-        Lampa.Settings.add({
-            name: 'UA-Kino (uafilm)',
-            component: 'uafilm',
-            icon: 'favorite',
-            page: {
-                info: 'Парсер потоку з ua-kino / klon.fun',
-                items: [
-                    {
-                        name: 'Увімкнути плагін',
-                        description: 'Автоматично підставляти відео в плеєр',
-                        type: 'toggle',
-                        default: true,
-                        onChange: function(val){ Lampa.Storage.set(KEY, val); }
-                    }
-                ]
-            }
-        });
+        // Додаємо пункт прямо в головне меню Lampa
+        function addToMenu(){
+            if (!Lampa.MainPage || !Lampa.MainPage.list) return;
+            var exists = Lampa.MainPage.list.filter(function(i){ return i.component === 'uafilm'; }).length;
+            if (exists) return;
+            Lampa.MainPage.list.push({
+                title: 'UA-Kino',
+                icon: 'favorite',
+                component: 'uafilm'
+            });
+        }
+        addToMenu();
+        setTimeout(addToMenu, 1000);
 
-        // 2) Окремий компонент з власним меню (на випадок, якщо Settings не показує)
+        // Власний компонент з меню налаштувань
         Lampa.Component.add('uafilm', {
             name: 'UA-Kino',
             icon: 'favorite',
-            onBack: function(){
-                Lampa.Activity.back();
-            },
+            onBack: function(){ Lampa.Activity.back(); },
             onRender: function(){
                 var enabled = Lampa.Storage.get(KEY, true);
                 this.wid('main').html(
-                    '<div style="padding:40px;color:#fff;font-size:20px;">' +
-                    '<h2>UA-Kino (uafilm)</h2>' +
-                    '<p>Статус: <b>' + (enabled ? 'Увімкнено' : 'Вимкнено') + '</b></p>' +
-                    '<button id="uafilm_toggle" style="padding:12px 20px;font-size:18px;">' +
-                    (enabled ? 'Вимкнути' : 'Увімкнути') + '</button>' +
+                    '<div style="padding:40px;color:#fff;">' +
+                    '<h1 style="margin-bottom:20px;">UA-Kino (uafilm)</h1>' +
+                    '<p style="font-size:20px;margin-bottom:20px;">Статус: <b>' + (enabled ? 'Увімкнено' : 'Вимкнено') + '</b></p>' +
+                    '<button id="uafilm_toggle" style="padding:14px 24px;font-size:18px;border:none;border-radius:6px;background:#e74c3c;color:#fff;">' +
+                    (enabled ? 'Вимкнути плагін' : 'Увімкнути плагін') + '</button>' +
                     '</div>'
                 );
                 var self = this;
@@ -58,7 +51,6 @@ Lampa.Plugins.add('uafilm', {
         // Логіка парсингу
         Lampa.Events.on('full', function(){
             if (Lampa.Storage.get(KEY, true) === false) return;
-
             var observer = new MutationObserver(function(muts, obs){
                 var iframe = document.querySelector('.film-player iframe');
                 var url = iframe ? (iframe.getAttribute('data-src') || iframe.getAttribute('src')) : null;
@@ -67,7 +59,6 @@ Lampa.Plugins.add('uafilm', {
                     obs.disconnect();
                 }
             });
-
             observer.observe(document.body, { childList: true, subtree: true });
             setTimeout(function(){ observer.disconnect(); }, 10000);
         });
