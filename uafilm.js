@@ -1,48 +1,62 @@
-(function() {
-    function isEnabled() {
-        return localStorage.getItem('ua_kino_enabled') !== 'false';
-    }
+(function(){
+    let plugin_name = 'uafilm';
 
-    Lampa.Plugins.add("uafilm_parser", {
-        name: "UA-Kino Fix Improved",
-        onReady: function() {
+    // Зареєструвати плагін
+    Lampa.Plugins.add(plugin_name, {
+        name: 'UA-Kino (uafilm)',
+        version: '1.0.0',
+        type: 'video',
+        component: plugin_name,
+        onReady: function(){
+            // Додаємо окремий пункт у налаштуваннях Lampa
             Lampa.Settings.add({
-                name: 'UA-Kino',
-                component: 'ua_kino_settings',
-                items: [
-                    {
-                        name: 'Увімкнути плагін',
-                        type: 'toggle',
-                        default: true,
-                        onSave: function(value) {
-                            localStorage.setItem('ua_kino_enabled', value);
+                name: 'UA-Kino (uafilm)',
+                component: plugin_name,
+                icon: 'favorite',
+                page: {
+                    // Це відкриє окрему сторінку налаштувань плагіна
+                    info: 'Парсер відео з ua-kino / klon.fun',
+                    items: [
+                        {
+                            name: 'Увімкнути плагін',
+                            description: 'Автоматично підставляти потік у плеєр',
+                            type: 'toggle',
+                            default: true,
+                            onChange: function(value){
+                                Lampa.Storage.set(plugin_name + '_enabled', value);
+                            }
+                        },
+                        {
+                            name: 'Статус',
+                            description: 'Поточний стан плагіна',
+                            type: 'trigger',
+                            value: 'Активний',
+                            onClick: function(){ Lampa.Notifi.show({ title: 'UA-Kino', text: 'Плагін працює' }); }
                         }
-                    }
-                ]
+                    ]
+                }
             });
 
-            Lampa.Events.on("full", function(data) {
-                if (!isEnabled()) return;
-                
-                console.log("UA-Kino: Event 'full' triggered, starting observer...");
+            // Логіка парсингу
+            Lampa.Events.on('full', function(){
+                if (Lampa.Storage.get(plugin_name + '_enabled', true) === false) return;
 
-                const observer = new MutationObserver((mutations, obs) => {
-                    const iframe = document.querySelector(".film-player iframe");
-                    const url = iframe ? (iframe.getAttribute("data-src") || iframe.getAttribute("src")) : null;
-                    
+                let observer = new MutationObserver(function(mutations, obs){
+                    let iframe = document.querySelector('.film-player iframe');
+                    let url = iframe ? (iframe.getAttribute('data-src') || iframe.getAttribute('src')) : null;
+
                     if (url) {
-                        console.log("UA-Kino: Found URL:", url);
-                        Lampa.Player.play({ url: url, title: "UA-Kino Stream" });
+                        Lampa.Player.play({ url: url, title: 'UA-Kino Stream' });
                         obs.disconnect();
                     }
                 });
 
                 observer.observe(document.body, { childList: true, subtree: true });
-                
-                setTimeout(() => {
-                    observer.disconnect();
-                }, 10000);
+
+                setTimeout(function(){ observer.disconnect(); }, 10000);
             });
+
+            console.log('[uafilm] plugin loaded');
         }
     });
-})();
+})(window.Lampa);
