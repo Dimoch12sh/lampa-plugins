@@ -8,39 +8,6 @@
         return Lampa.Storage.get(KEY, true) !== false;
     }
 
-    // Усі можливі селектори, де може бути плеєр/посилання
-    var SELECTORS = [
-        '.film-player iframe',
-        '.player iframe',
-        '.video-player iframe',
-        'iframe[src*="player"]',
-        'iframe[src*="embed"]',
-        'iframe[src*="video"]',
-        '.full__player iframe',
-        '.view--player iframe',
-        'video source',
-        'video'
-    ];
-
-    function extractUrl() {
-        for (var i = 0; i < SELECTORS.length; i++) {
-            var el = document.querySelector(SELECTORS[i]);
-            if (!el) continue;
-
-            if (el.tagName === 'IFRAME') {
-                var u = el.getAttribute('data-src') || el.getAttribute('src');
-                if (u && u.indexOf('http') === 0) return u;
-            } else if (el.tagName === 'SOURCE') {
-                var s = el.getAttribute('src');
-                if (s && s.indexOf('http') === 0) return s;
-            } else if (el.tagName === 'VIDEO') {
-                var v = el.getAttribute('src') || (el.currentSrc) || '';
-                if (v && v.indexOf('http') === 0) return v;
-            }
-        }
-        return null;
-    }
-
     function addPlugin() {
         if (Lampa.Notifi) {
             Lampa.Notifi.show({ title: 'UA-Kino', text: 'Плагін увімкнено', time: 2500 });
@@ -50,39 +17,43 @@
             if (!isEnabled()) return;
 
             var tries = 0;
-            var maxTries = 40; // до 20 сек
+            var maxTries = 40; // до 20 c
 
-            var check = function () {
-                var url = extractUrl();
-                if (url) {
-                    if (Lampa.Notifi) {
-                        Lampa.Notifi.show({ title: 'UA-Kino', text: 'Знайдено потік', time: 2000 });
-                    }
-                    Lampa.Player.play({ url: url, title: 'UA-Kino Stream' });
-                    return;
-                }
-                tries++;
-                if (tries < maxTries) {
-                    setTimeout(check, 500);
-                } else {
-                    if (Lampa.Notifi) {
-                        Lampa.Notifi.show({ title: 'UA-Kino', text: 'Потік не знайдено (інший сайт?)', time: 3000 });
-                    }
+            var start = function () {
+                var iframe = document.querySelector('.film-player iframe');
+                if (!iframe) { retry(); return; }
+
+                var url = iframe.getAttribute('data-src') || iframe.getAttribute('src');
+                if (!url) { retry(); return; }
+
+                // Якщо плеєр ще не завантажився — підставляємо src примусово
+                if (!iframe.getAttribute('src')) {
+                    iframe.setAttribute('src', url);
+                    if (Lampa.Notifi) Lampa.Notifi.show({ title: 'UA-Kino', text: 'Плеєр завантажено', time: 2000 });
                 }
             };
 
-            // Спроба через MutationObserver + таймер
+            var retry = function () {
+                tries++;
+                if (tries < maxTries) setTimeout(start, 500);
+                else if (Lampa.Notifi) Lampa.Notifi.show({ title: 'UA-Kino', text: 'Плеєр не знайдено', time: 3000 });
+            };
+
+            // Стежимо за появою плеєра
             var observer = new MutationObserver(function () {
-                var url = extractUrl();
-                if (url) {
-                    observer.disconnect();
-                    if (Lampa.Notifi) Lampa.Notifi.show({ title: 'UA-Kino', text: 'Знайдено потік', time: 2000 });
-                    Lampa.Player.play({ url: url, title: 'UA-Kino Stream' });
+                var iframe = document.querySelector('.film-player iframe');
+                if (iframe) {
+                    var url = iframe.getAttribute('data-src') || iframe.getAttribute('src');
+                    if (url && !iframe.getAttribute('src')) {
+                        iframe.setAttribute('src', url);
+                        observer.disconnect();
+                        if (Lampa.Notifi) Lampa.Notifi.show({ title: 'UA-Kino', text: 'Плеєр завантажено', time: 2000 });
+                    }
                 }
             });
             observer.observe(document.body, { childList: true, subtree: true });
 
-            check(); // паралельна перевірка таймером
+            start();
             setTimeout(function () { observer.disconnect(); }, 20000);
         });
     }
