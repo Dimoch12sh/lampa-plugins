@@ -1,132 +1,169 @@
 (function () {
     'use strict';
 
-    var SOURCE_NAME = 'uafilm';
-    var SOURCE_TITLE = 'UA-Kino';
+    var NAME = 'uafilm';
     var HOST = 'https://klon.fun';
 
-    var network = new Lampa.Reguest();
-
-    function decodeHtml(s) {
-        if (!s) return '';
-        return s.replace(/&quot;/g, '"').replace(/&amp;/g, '&')
-                .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
-                .replace(/&#39;/g, "'").replace(/&nbsp;/g, ' ')
-                .replace(/&laquo;/g, '«').replace(/&raquo;/g, '»');
-    }
+    var networks = [];
+    var LAMPA_VERSION = (typeof Lampa !== 'undefined' && Lampa.Manifest && Lampa.Manifest.app_digital) || 0;
 
     function grep(html, re) {
         var m = html.match(re);
         return m ? (m[1] || m[0]) : '';
     }
 
-    // === ПОШУК ===
-    function search(params, oncomplite, onerror) {
-        var query = encodeURIComponent(params.query);
-        var url = HOST + '/index.php?do=search&subaction=search&story=' + query;
+    function decodeHtml(s) {
+        if (!s) return '';
+        return s.replace(/&quot;/g, '"').replace(/&amp;/g, '&')
+                .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+                .replace(/&#39;/g, "'").replace(/&nbsp;/g, ' ')
+                .replace(/&laquo;/g, '«').replace(/&raquo;/g, '»')
+                .replace(/&mdash;/g, '—').replace(/&ndash;/g, '–');
+    }
 
-        network.timeout(15000);
-        network.native(url, function (html) {
-            if (!html) { onerror('no data'); return; }
+    function newNetwork() {
+        var n = new Lampa.Reguest();
+        networks.push(n);
+        return n;
+    }
 
-            var items = [];
-            var cards = html.match(/<a href="(https:\/\/klon\.fun\/(?:filmy|serialy)\/[0-9]+-[^"]+\.html)" class="short-news__small-card__link">([\s\S]*?)<\/a>/g) || [];
+    function clearNetworks() {
+        networks.forEach(function (n) { n.clear(); });
+        networks = [];
+    }
 
-            for (var i = 0; i < cards.length; i++) {
-                var href = grep(cards[i], /href="(https:\/\/klon\.fun\/[^"]+\.html)"/);
-                var img = grep(cards[i], /src="([^"]+\.(?:jpg|webp|jpeg|png))"/);
-                var title = grep(cards[i], /class="card-link__text[^"]*">([^<]+)</) || grep(cards[i], /alt="([^"]+)"/);
-                if (href) {
-                    items.push({
-                        id: href,
-                        title: decodeHtml(title || href),
-                        url: href,
-                        img: img ? (img.indexOf('http') === 0 ? img : HOST + img) : '',
-                        source: SOURCE_NAME
-                    });
+    // Компонент пошуку/відтворення
+    var component = function () {
+        var network = newNetwork();
+        var data = {};
+
+        this.create = function () {
+            var activity = Lampa.Activity.active();
+            if (!activity || !activity.movie) return;
+
+            var movie = activity.movie;
+            var title = movie.title || movie.name || '';
+            var year = (movie.year || movie.release_date || '').toString().slice(0, 4);
+
+            // Шукаємо на klon.fun
+            var searchUrl = HOST + '/index.php?do=search&subaction=search&story=' + encodeURIComponent(title);
+
+            network.timeout(15000);
+            network.native(searchUrl, function (html) {
+                if (!html) { noResult(); return; }
+
+                // Шукаємо посилання на фільм
+                var cards = html.match(/<a href="(https:\/\/klon\.fun\/(?:filmy|serialy)\/[0-9]+-[^"]+\.html)" class="short-news__small-card__link">([\s\S]*?)<\/a>/g) || [];
+
+                var found = null;
+                for (var i = 0; i < cards.length; i++) {
+                    var href = grep(cards[i], /href="(https:\/\/klon\.fun\/[^"]+\.html)"/);
+                    var cardTitle = grep(cards[i], /class="card-link__text[^"]*">([^<]+)</) || grep(cards[i], /alt="([^"]+)"/);
+                    if (href && (!found || cardTitle.toLowerCase().indexOf(title.toLowerCase()) >= 0)) {
+                        found = { url: href, title: cardTitle };
+                    }
                 }
-            }
 
-            if (!items.length) { onerror('not found'); return; }
-            oncomplite({ results: items, has_more: false });
-        }, onerror);
-    }
+                if (!found) { noResult(); return; }
 
-    // === СТОРІНКА ФІЛЬМУ ===
-    function full(data, oncomplite, onerror) {
-        var url = data.url || data.id;
-        network.native(url, function (html) {
-            if (!html) { onerror('no data'); return; }
+                // Завантажуємо сторінку фільму
+                var network2 = newNetwork();
+                network2.timeout(15000);
+                network2.native(found.url, function (html2) {
+                    if (!html2) { noResult(); return; }
 
-            var playerUrl = '';
-            var fm = html.match(/<div class="film-player"[^>]*>([\s\S]*?)<\/div>/);
-            if (fm) {
-                var ifr = fm[1].match(/data-src="([^"]+)"/) || fm[1].match(/src="([^"]+)"/);
-                if (ifr) playerUrl = ifr[1];
-            }
+                    var playerUrl = '';
+                    var fm = html2.match(/<div class="film-player"[^>]*>([\s\S]*?)<\/div>/);
+                    if (fm) {
+                        var ifr = fm[1].match(/data-src="([^"]+)"/) || fm[1].match(/src="([^"]+)"/);
+                        if (ifr) playerUrl = ifr[1];
+                    }
 
-            var title = grep(html, /<title>([^<]+)</);
-            var poster = grep(html, /<meta property="og:image" content="([^"]+)"/) || grep(html, /class="poster-block__poster"[^>]*><img[^>]*src="([^"]+)"/);
-            var desc = grep(html, /<meta property="og:description" content="([^"]+)"/);
-            var year = grep(html, /<div class="table-info__item[^"]*">\s*([0-9]{4})/);
+                    var poster = grep(html2, /<meta property="og:image" content="([^"]+)"/) || grep(html2, /class="poster-block__poster"[^>]*><img[^>]*src="([^"]+)"/);
+                    var desc = grep(html2, /<meta property="og:description" content="([^"]+)"/);
 
-            oncomplite({
-                title: decodeHtml((title || '').split(' дивитись')[0]),
-                img: poster ? (poster.indexOf('http') === 0 ? poster : HOST + poster) : '',
-                desc: decodeHtml(desc),
-                year: year,
-                source: SOURCE_NAME,
-                player: playerUrl
-            });
-        }, onerror);
-    }
+                    if (playerUrl) {
+                        Lampa.Player.play({ url: playerUrl, title: 'UA-Kino: ' + decodeHtml(cardTitle || found.title) });
+                        if (Lampa.Noty) Lampa.Noty.show('UA-Kino: плеєр завантажено');
+                    } else {
+                        noResult();
+                    }
+                }, function () { noResult(); });
+            }, function () { noResult(); });
+        };
 
-    function detail(data, oncomplite, onerror) {
-        full(data, oncomplite, onerror);
-    }
+        function noResult() {
+            if (Lampa.Noty) Lampa.Noty.show('UA-Kino: не знайдено на klon.fun');
+        }
 
-    var UA = {
-        SOURCE_NAME: SOURCE_NAME,
-        SOURCE_TITLE: SOURCE_TITLE,
-        search: search,
-        full: full,
-        detail: detail,
-        main: function () {},
-        menu: function () {},
-        list: function () {}
+        this.destroy = function () {
+            clearNetworks();
+        };
     };
 
-    function addPlugin() {
-        if (Lampa.Api.sources[SOURCE_NAME]) {
-            if (Lampa.Noty) Lampa.Noty.show('UA-Kino вже встановлено');
-            return;
-        }
-
-        Lampa.Api.sources[SOURCE_NAME] = UA;
-        Object.defineProperty(Lampa.Api.sources, SOURCE_NAME, {
-            get: function () { return UA; }
-        });
-
-        var sources = {};
-        if (Lampa.Params.values && Lampa.Params.values['source']) {
-            Lampa.Arrays.extend(sources, Lampa.Params.values['source']);
-            sources[SOURCE_NAME] = SOURCE_TITLE;
-        } else {
-            sources[SOURCE_NAME] = SOURCE_TITLE;
-        }
-        Lampa.Params.select('source', sources, SOURCE_NAME);
-
-        if (Lampa.Notifi) Lampa.Notifi.show({ title: 'UA-Kino', text: 'Джерело додано', time: 2500 });
-    }
-
+    // Старт плагіна
     function startPlugin() {
-        if (window.appready) addPlugin();
-        else Lampa.Listener.follow('app', function (e) {
-            if (e.type == 'ready') addPlugin();
+        window.uafilm_plugin = true;
+
+        var manifest = {
+            type: 'video',
+            version: '1.0.0',
+            name: 'UA-Kino (klon.fun)',
+            description: 'Пошук та перегляд фільмів з klon.fun',
+            component: NAME,
+            onContextMenu: function (object) {
+                return { name: 'Дивитись на UA-Kino', description: 'Пошук на klon.fun' };
+            },
+            onContextLauch: function (object) {
+                Lampa.Component.add(NAME, component);
+                Lampa.Activity.push({
+                    url: '',
+                    title: 'UA-Kino',
+                    component: NAME,
+                    movie: object,
+                    page: 1
+                });
+            }
+        };
+        Lampa.Manifest.plugins = manifest;
+
+        // Кнопка на сторінці фільму (як у fx.js)
+        Lampa.Listener.follow('full', function (e) {
+            if (e.type == 'complite') {
+                var btn = $('<div class="full-start__button selector" data-subtitle="UA-Kino v1.0.0">' +
+                    '<svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>' +
+                    '<span>UA-Kino</span></div>');
+                btn.on('hover:enter', function () {
+                    Lampa.Component.add(NAME, component);
+                    Lampa.Activity.push({
+                        url: '',
+                        title: 'UA-Kino',
+                        component: NAME,
+                        movie: e.data.movie,
+                        page: 1
+                    });
+                });
+                var target = e.object.activity.render().find('.view--torrent, .view--online, .full-start__button').first();
+                if (target.length) target.after(btn);
+                else e.object.activity.render().find('.full-start').append(btn);
+            }
         });
+
+        // Налаштування (як у fx.js через SettingsApi)
+        if (typeof Lampa.SettingsApi !== 'undefined' && Lampa.SettingsApi.addComponent) {
+            Lampa.SettingsApi.addComponent({
+                component: NAME,
+                name: 'UA-Kino',
+                icon: '<svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>'
+            });
+            Lampa.Template.add('settings_uafilm', '<div><div class="settings-param"><div class="settings-param__name">UA-Kino (klon.fun)</div><div class="settings-param__value">v1.0.0</div></div></div>');
+            Lampa.Settings.listener.follow('open', function (e) {
+                if (e.name == NAME) {}
+            });
+        }
     }
 
-    if (!window.uafilm_plugin) startPlugin();
-    window.uafilm_plugin = true;
+    // Запуск
+    if (!window.uafilm_plugin && LAMPA_VERSION >= 155) startPlugin();
 
 })();
